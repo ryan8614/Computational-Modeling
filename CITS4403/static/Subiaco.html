@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Real-time Vehicle Tracking</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+    <style>
+        /* Remove margins and padding */
+        body, html {
+            margin:0;
+            padding:0;
+        }
+        /* Set map height and width to 100% to fill the entire window */
+        #map {
+            width: 100%;
+            height: 100vh; /* 100% of the viewport height */
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <script>
+        // Initialize the map
+        var map = L.map('map').setView([-31.9486, 115.8249], 16);
+
+        // Set up the map tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+        
+    
+        var lightIcon = L.icon({
+            iconUrl: '/static/traffic-light.png',  // Replace with the path to your car icon image
+            iconSize: [15, 20],  // size of the icon
+            iconAnchor: [16, 16],  // point of the icon which will correspond to marker's location
+        });
+
+
+        // Add initial markers for the traffic lights
+        var trafficLightData = [];
+        // Add initial markers for the vehicles
+        var vehicleMarkers = [];
+        // Add initial markers for the circles
+        var circleMarkers = [];
+
+        // Function to update the circle positions from the server
+        function fetchCirclePositions() {
+            fetch('http://127.0.0.1:5000/get_circle_positions', {method:'GET', mode:'cors'})  // Assuming a Flask endpoint for circles
+            .then(response => response.json())
+            .then(data => {
+                if (window.circleMarkers) {
+                    window.circleMarkers.forEach(circle => map.removeLayer(circle));
+                }
+                window.circleMarkers = [];
+                
+                for (var i = 0; i < data.length; i++) {
+                    var circleColor = '';
+                    var circleFillColor = '';
+                    switch (i) {
+                        case 0:  // level 1
+                            circleColor = 'rgba(255, 0, 0, 0)';  // Bright Red
+                            circleFillColor = 'rgba(255, 0, 0, 0.5)';
+                            break;
+                        case 1:  // level 2
+                            circleColor = 'rgba(0, 0, 255, 0)';  // Bright Blue
+                            circleFillColor = 'rgba(0, 0, 255, 0.5)';
+                            break;
+                        case 2:  // level 3
+                            circleColor = 'rgba(0, 255, 0, 0)';  // Bright Green
+                            circleFillColor = 'rgba(0, 255, 0, 0.5)';
+                            break;
+                        case 3:  // level 4
+                            circleColor = 'rgba(255, 165, 0, 0)';  // Bright Orange
+                            circleFillColor = 'rgba(255, 165, 0, 0.5)';
+                            break;
+                        default:
+                            circleColor = 'rgba(0, 255, 0, 0)';  // Default color if no match found
+                            circleFillColor = 'rgba(0, 255, 0, 0.5)';
+                            break;
+                    }
+
+                    var circle = L.circle([data[i][0][1], data[i][0][0]], {
+                        color: circleColor,
+                        fillColor: circleFillColor,
+                        fillOpacity: 0.7,
+                        radius: 3*data[i][1]  // Assuming the radius is provided in the data
+                    }).addTo(map);
+                    circle.bringToFront();
+                    window.circleMarkers.push(circle);
+                }
+            }).catch(error => console.log('Error:', error));
+        }
+
+        function fetchTrafficLightPositions() {
+            fetch('http://127.0.0.1:5000/get_traffic_lights', {method:'GET', mode:'cors'})
+            .then(response => response.json())
+            .then(data => {
+                trafficLightData = data;
+                data.forEach(light => {
+                L.marker([light[1], light[0]], {icon: lightIcon}).addTo(map);
+            });
+            })
+            .catch(error => console.log('Error:', error));
+        }
+
+
+        
+        // Function to update the vehicle positions from the server
+        function fetchVehiclePositions() {
+            fetch('http://127.0.0.1:5000/get_positions', {method:'GET', mode:'cors'})  // Matching with the Flask endpoint
+            .then(response => response.json())
+            .then(data => {
+                if (window.vehicleMarkers) {
+                    window.vehicleMarkers.forEach(marker => map.removeLayer(marker));
+                }
+                window.vehicleMarkers = [];
+                var vehicle_positions = data[0];
+                var vehicle_speed_ratios = data[1];
+
+                // Add new markers
+                for (var i = 0; i < vehicle_positions.length; i++) {
+                var speed_value = vehicle_speed_ratios[i];
+                // Interpolate the color based on the speed value
+                var startColor = [255, 0, 0];  // Red
+                var endColor = [0, 102, 204];  // Deeper Blue
+                var interpolated_color = [
+                    Math.round(startColor[0] + (endColor[0] - startColor[0]) * speed_value),
+                    Math.round(startColor[1] + (endColor[1] - startColor[1]) * speed_value),
+                    Math.round(startColor[2] + (endColor[2] - startColor[2]) * speed_value)
+                ];
+                var color = `rgb(${interpolated_color[0]}, ${interpolated_color[1]}, ${interpolated_color[2]})`;
+                
+                var marker = L.circleMarker([vehicle_positions[i][1], vehicle_positions[i][0]], {
+                    color: color,
+                    fillColor: color,
+                    fillOpacity: 1,
+                    radius: 5
+                }).addTo(map);
+                vehicleMarkers.push(marker);
+            }
+            // Bring all circle markers to the front
+            circleMarkers.forEach(circle => circle.bringToFront());
+            }).catch(error => console.log('Error:', error));
+        }
+        
+
+        // 当页面加载完成后执行的函数
+        function onPageLoad() {
+            // 首先尝试获取交通灯的数据
+            fetchTrafficLightPositions();
+
+            var checkTrafficLightsInterval = setInterval(() => {
+                if (trafficLightData.length > 0) {
+                    // 如果成功获取到数据，取消检查
+                    clearInterval(checkTrafficLightsInterval);
+                    
+                    fetchVehiclePositions();
+                    setInterval(fetchVehiclePositions, 1000);
+
+                    fetchCirclePositions();
+                    setInterval(fetchCirclePositions, 5000);
+                } else {
+                    fetchTrafficLightPositions();
+                }
+            }, 2000);
+        }
+
+     
+        window.addEventListener('load', onPageLoad);
+
+    </script>
+</body>
+</html>
+
